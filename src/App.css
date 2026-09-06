@@ -105,3 +105,143 @@ button {
     position: static;
   }
 }
+
+.cart label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: bold;
+}
+
+.cart input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  margin-bottom: 20px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.success {
+  color: green;
+  background: #eaf7ea;
+  padding: 12px;
+  border-radius: 6px;
+}
+
+.order-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.role-switch {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.active-role {
+  font-weight: bold;
+  outline: 2px solid #333;
+}
+
+.waiter-dashboard {
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.orders {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+.order-card,
+.order-details {
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 20px;
+  background: white;
+}
+
+.order-details {
+  margin-top: 30px;
+}
+
+.order-details label {
+  display: block;
+  margin-top: 15px;
+  margin-bottom: 6px;
+  font-weight: bold;
+}
+
+.order-details select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  margin-bottom: 15px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.order-details button {
+  margin-right: 10px;
+  margin-top: 10px;
+}
+
+.serve-button {
+  background: #ddd;
+}
+
+@media (max-width: 800px) {
+  .orders {
+    grid-template-columns: 1fr;
+  }
+}
+
+.customer-actions {
+  max-width: 1200px;
+  margin: 40px auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 30px;
+}
+
+.action-card {
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 20px;
+  background: white;
+}
+
+.action-card label {
+  display: block;
+  margin-top: 15px;
+  margin-bottom: 6px;
+  font-weight: bold;
+}
+
+.action-card input,
+.action-card select,
+.action-card textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.action-card textarea {
+  resize: vertical;
+}
+
+.action-card button {
+  margin-top: 15px;
+  width: 100%;
+}
+
+@media (max-width: 800px) {
+  .customer-actions {
+    grid-template-columns: 1fr;
+  }
+}
