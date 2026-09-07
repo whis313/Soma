@@ -33,9 +33,12 @@ function App() {
   const [paymentOrderId, setPaymentOrderId] = useState('')
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentDue, setPaymentDue] = useState(null)
+  const [paymentItems, setPaymentItems] = useState([])
   const [paymentLoading, setPaymentLoading] = useState(false)
   const [paymentSubmitted, setPaymentSubmitted] = useState(false)
   const [paymentError, setPaymentError] = useState(null)
+
+  const [lastPlacedOrder, setLastPlacedOrder] = useState(null)
 
   useEffect(() => {
     async function loadData() {
@@ -92,6 +95,7 @@ function App() {
     setPaymentLoading(true)
     setPaymentError(null)
     setPaymentDue(null)
+    setPaymentItems([])
 
     const numericOrderId = Number(orderId)
 
@@ -102,8 +106,9 @@ function App() {
 
     const { data: orderItems, error: orderItemsError } = await supabase
       .from('order_items')
-      .select('quantity, unit_price, line_total')
+      .select('id, menu_item_id, quantity, unit_price, line_total')
       .eq('order_id', numericOrderId)
+      .order('id')
 
     if (orderItemsError) {
       setPaymentError(
@@ -119,18 +124,45 @@ function App() {
       return
     }
 
-    const orderTotal = orderItems.reduce((sum, item) => {
+    const breakdown = orderItems.map((item) => {
+      const menuItem = menuItems.find(
+        (menuItemRecord) =>
+          menuItemRecord.id === item.menu_item_id
+      )
+
+      const quantity = Number(item.quantity) || 0
+      const unitPrice = Number(item.unit_price) || 0
+
       const lineTotal =
         item.line_total !== null &&
         item.line_total !== undefined
           ? Number(item.line_total)
-          : Number(item.unit_price) * Number(item.quantity)
+          : unitPrice * quantity
 
-      return sum + lineTotal
-    }, 0)
+      return {
+        id: item.id,
+        name: menuItem?.name || `Menu item #${item.menu_item_id}`,
+        quantity,
+        unitPrice,
+        lineTotal
+      }
+    })
 
+    const orderTotal = breakdown.reduce(
+      (sum, item) => sum + item.lineTotal,
+      0
+    )
+
+    setPaymentItems(breakdown)
     setPaymentDue(orderTotal)
     setPaymentLoading(false)
+  }
+
+  function formatCurrency(amount) {
+    return `₦${Number(amount || 0).toLocaleString('en-NG', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    })}`
   }
 
   function addToCart(item) {
@@ -210,13 +242,32 @@ function App() {
       return
     }
 
+    const placedOrderDetails = {
+      ...order,
+      items: cartItems.map((item) => ({
+        id: item.id,
+        name: item.name,
+        quantity: cart[item.id],
+        unitPrice: Number(item.price),
+        lineTotal: Number(item.price) * cart[item.id]
+      })),
+      total: orderItems.reduce(
+        (sum, item) => sum + item.line_total,
+        0
+      )
+    }
+
+    setLastPlacedOrder(placedOrderDetails)
+
     setSuccess(
-      `Order #${order.id} placed successfully! Estimated waiting time: ${waitingTime} minutes.`
+      `Order #${order.id} placed successfully!`
     )
 
     setCart({})
     setTableNumber('')
     setPlacingOrder(false)
+
+    await loadOrders()
   }
 
   async function openOrder(order) {
@@ -244,10 +295,6 @@ function App() {
       return
     }
 
-    /*
-      Find the items belonging to this order so we can determine
-      whether a chef, bartender, or both are actually required.
-    */
     const { data: orderItems, error: orderItemsError } = await supabase
       .from('order_items')
       .select('menu_item_id')
@@ -272,7 +319,9 @@ function App() {
         return
       }
 
-      const category = String(menuItem.category || '').toLowerCase()
+      const category = String(
+        menuItem.category || ''
+      ).toLowerCase()
 
       if (category.includes('drink')) {
         needsBartender = true
@@ -281,11 +330,6 @@ function App() {
       }
     })
 
-    /*
-      If the order has items but their categories do not clearly
-      identify them, require both roles rather than accidentally
-      skipping a required preparer.
-    */
     if (
       (orderItems || []).length > 0 &&
       !needsChef &&
@@ -325,7 +369,9 @@ function App() {
     )
 
     setSuccess(
-      `Order #${updatedOrder.id} is now assigned to ${waiter?.name || 'the selected waiter'}.`
+      `Order #${updatedOrder.id} is now assigned to ${
+        waiter?.name || 'the selected waiter'
+      }.`
     )
   }
 
@@ -389,7 +435,9 @@ function App() {
     )
 
     setSuccess(
-      `Staff assignment saved for Order #${updatedOrder.id}. Waiter: ${waiter?.name || 'Selected waiter'}.`
+      `Staff assignment saved for Order #${updatedOrder.id}. Waiter: ${
+        waiter?.name || 'Selected waiter'
+      }.`
     )
   }
 
@@ -489,12 +537,18 @@ function App() {
 
     const numericOrderId = Number(paymentOrderId)
 
-    if (!Number.isInteger(numericOrderId) || numericOrderId <= 0) {
+    if (
+      !Number.isInteger(numericOrderId) ||
+      numericOrderId <= 0
+    ) {
       setPaymentError('Please enter a valid order number.')
       return
     }
 
-    if (!paymentAmount || Number(paymentAmount) <= 0) {
+    if (
+      !paymentAmount ||
+      Number(paymentAmount) <= 0
+    ) {
       setPaymentError('Please enter a valid payment amount.')
       return
     }
@@ -516,12 +570,8 @@ function App() {
 
     if (enteredAmountCents !== requiredAmountCents) {
       setPaymentError(
-        `Payment must be exactly ₦${Number(paymentDue).toLocaleString(
-          'en-NG',
-          {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-          }
+        `Payment must be exactly ${formatCurrency(
+          paymentDue
         )}. No payment was recorded.`
       )
       return
@@ -548,15 +598,18 @@ function App() {
       return
     }
 
-    const { error: paymentInsertError } = await supabase
-      .from('payments')
-      .insert({
-        order_id: numericOrderId,
-        amount: Number(paymentDue),
-        payment_method: 'Pretend Payment',
-        status: 'Paid',
-        is_pretend: true
-      })
+    const { data: payment, error: paymentInsertError } =
+      await supabase
+        .from('payments')
+        .insert({
+          order_id: numericOrderId,
+          amount: Number(paymentDue),
+          payment_method: 'Pretend Payment',
+          status: 'Paid',
+          is_pretend: true
+        })
+        .select('*')
+        .single()
 
     if (paymentInsertError) {
       setPaymentError(
@@ -565,11 +618,58 @@ function App() {
       return
     }
 
+    const { data: updatedOrder, error: orderUpdateError } =
+      await supabase
+        .from('orders')
+        .update({
+          status: 'Paid'
+        })
+        .eq('id', numericOrderId)
+        .select('*')
+        .single()
+
+    if (orderUpdateError) {
+      await supabase
+        .from('payments')
+        .delete()
+        .eq('id', payment.id)
+
+      setPaymentError(
+        `Payment could not be completed because the order could not be marked as paid: ${orderUpdateError.message}`
+      )
+      return
+    }
+
     setPaymentSubmitted(true)
+
+    setSuccess(
+      `Pretend payment of ${formatCurrency(
+        paymentDue
+      )} recorded successfully. Order #${numericOrderId} is now Paid.`
+    )
+
+    setOrders((currentOrders) =>
+      currentOrders.map((order) =>
+        order.id === updatedOrder.id
+          ? updatedOrder
+          : order
+      )
+    )
+
+    if (
+      lastPlacedOrder &&
+      lastPlacedOrder.id === updatedOrder.id
+    ) {
+      setLastPlacedOrder((currentOrder) => ({
+        ...currentOrder,
+        status: 'Paid'
+      }))
+    }
 
     setPaymentOrderId('')
     setPaymentAmount('')
     setPaymentDue(null)
+    setPaymentItems([])
   }
 
   const cartItems = menuItems.filter(
@@ -663,7 +763,7 @@ function App() {
                     </p>
 
                     <p>
-                      ₦{Number(item.price).toLocaleString()}
+                      {formatCurrency(item.price)}
                     </p>
 
                     <p>
@@ -715,10 +815,9 @@ function App() {
                         </strong>
 
                         <p>
-                          ₦
-                          {Number(
+                          {formatCurrency(
                             item.price
-                          ).toLocaleString()}{' '}
+                          )}{' '}
                           × {cart[item.id]}
                         </p>
                       </div>
@@ -750,8 +849,7 @@ function App() {
                   <hr />
 
                   <h3>
-                    Total: ₦
-                    {total.toLocaleString()}
+                    Total: {formatCurrency(total)}
                   </h3>
 
                   <p>
@@ -759,7 +857,9 @@ function App() {
                     {Math.max(
                       ...cartItems.map(
                         (item) =>
-                          Number(item.preparation_time)
+                          Number(
+                            item.preparation_time
+                          )
                       )
                     )}{' '}
                     minutes
@@ -778,6 +878,70 @@ function App() {
               )}
             </aside>
           </main>
+
+          {lastPlacedOrder && (
+            <section className="order-details customer-order-details">
+              <h2>
+                Latest Order #{lastPlacedOrder.id}
+              </h2>
+
+              <p>
+                <strong>Table:</strong>{' '}
+                {lastPlacedOrder.table_number}
+              </p>
+
+              <p>
+                <strong>Status:</strong>{' '}
+                {lastPlacedOrder.status}
+              </p>
+
+              <p>
+                <strong>
+                  Estimated waiting time:
+                </strong>{' '}
+                {lastPlacedOrder.waiting_time} minutes
+              </p>
+
+              <h3>Order Items</h3>
+
+              {lastPlacedOrder.items.map(
+                (item) => (
+                  <div
+                    className="cart-item"
+                    key={item.id}
+                  >
+                    <div>
+                      <strong>
+                        {item.name}
+                      </strong>
+
+                      <p>
+                        {formatCurrency(
+                          item.unitPrice
+                        )}{' '}
+                        × {item.quantity}
+                      </p>
+                    </div>
+
+                    <strong>
+                      {formatCurrency(
+                        item.lineTotal
+                      )}
+                    </strong>
+                  </div>
+                )
+              )}
+
+              <hr />
+
+              <h3>
+                Total:{' '}
+                {formatCurrency(
+                  lastPlacedOrder.total
+                )}
+              </h3>
+            </section>
+          )}
 
           <section className="customer-actions">
             <div className="action-card">
@@ -882,6 +1046,7 @@ function App() {
                   setPaymentOrderId(value)
                   setPaymentAmount('')
                   setPaymentDue(null)
+                  setPaymentItems([])
                   setPaymentSubmitted(false)
                   setPaymentError(null)
 
@@ -892,27 +1057,51 @@ function App() {
                 placeholder="e.g. 2"
               />
 
-              <label>Amount Due</label>
+              <label>Payment Breakdown</label>
 
               {paymentLoading ? (
                 <p>
-                  Calculating order total...
+                  Loading order details...
                 </p>
-              ) : paymentDue !== null ? (
-                <h3>
-                  ₦
-                  {Number(paymentDue).toLocaleString(
-                    'en-NG',
-                    {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2
-                    }
-                  )}
-                </h3>
+              ) : paymentItems.length > 0 ? (
+                <div className="payment-breakdown">
+                  {paymentItems.map((item) => (
+                    <div
+                      className="cart-item"
+                      key={item.id}
+                    >
+                      <div>
+                        <strong>
+                          {item.name}
+                        </strong>
+
+                        <p>
+                          {formatCurrency(
+                            item.unitPrice
+                          )}{' '}
+                          × {item.quantity}
+                        </p>
+                      </div>
+
+                      <strong>
+                        {formatCurrency(
+                          item.lineTotal
+                        )}
+                      </strong>
+                    </div>
+                  ))}
+
+                  <hr />
+
+                  <h3>
+                    Amount Due:{' '}
+                    {formatCurrency(paymentDue)}
+                  </h3>
+                </div>
               ) : (
                 <p>
                   Enter an order number to see
-                  the amount due.
+                  the payment breakdown.
                 </p>
               )}
 
@@ -951,7 +1140,8 @@ function App() {
 
               {paymentSubmitted && (
                 <p className="success">
-                  Payment recorded.
+                  Payment recorded and order marked
+                  as paid.
                 </p>
               )}
             </div>
@@ -969,7 +1159,9 @@ function App() {
             <select
               value={selectedWaiter}
               onChange={(event) => {
-                setSelectedWaiter(event.target.value)
+                setSelectedWaiter(
+                  event.target.value
+                )
                 setSelectedOrder(null)
                 setError(null)
                 setSuccess(null)
@@ -992,7 +1184,8 @@ function App() {
 
           {!selectedWaiter ? (
             <p>
-              Please select your name to view and handle orders.
+              Please select your name to view and handle
+              orders.
             </p>
           ) : orders.length === 0 ? (
             <p>
@@ -1109,7 +1302,8 @@ function App() {
 
               {!orderNeedsChef && (
                 <p>
-                  No chef required — this order contains drinks only.
+                  No chef required — this order contains
+                  drinks only.
                 </p>
               )}
 
@@ -1147,7 +1341,8 @@ function App() {
 
               {!orderNeedsBartender && (
                 <p>
-                  No bartender required — this order contains food only.
+                  No bartender required — this order contains
+                  food only.
                 </p>
               )}
 
@@ -1162,13 +1357,18 @@ function App() {
                 onClick={markServed}
                 disabled={
                   selectedOrder.status ===
-                  'Served'
+                  'Served' ||
+                  selectedOrder.status ===
+                  'Paid'
                 }
               >
                 {selectedOrder.status ===
                 'Served'
                   ? 'Order Served'
-                  : 'Mark as Served'}
+                  : selectedOrder.status ===
+                    'Paid'
+                    ? 'Order Paid'
+                    : 'Mark as Served'}
               </button>
             </div>
           )}
